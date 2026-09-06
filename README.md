@@ -1,10 +1,10 @@
 # audio2text
 
-Real-time audio-to-text transcription tool for Wayland using the DashScope API.
+Real-time Chinese audio-to-text transcription tool for Wayland using the DashScope API.
 
 ## Features
 
-- Real-time speech recognition using DashScope WebSocket API
+- Real-time Chinese speech recognition using DashScope WebSocket API
 - Global hotkey (Super+I) to toggle recording
 - Automatic text input into active application
 - Supports microphone input with automatic audio format conversion
@@ -87,8 +87,8 @@ audio2text
 
 The application will:
 1. Start recording immediately from your microphone
-2. Stream audio to DashScope for real-time transcription
-3. Type the recognized text into your active application
+2. Stream audio to DashScope for real-time Chinese transcription
+3. Type the recognized Chinese text into your active application
 4. Continue until you press `Ctrl+C` to exit
 
 ### Via Sway hotkey (Recommended)
@@ -111,7 +111,7 @@ This is the recommended way to use audio2text in a Sway environment.
 
 The application uses the following defaults:
 
-- Sample rate: 16000 Hz
+- Sample rate: 16000 Hz (`qwen-audio-3.0-asr-flash-streaming`)
 - Audio format: PCM 16-bit
 - Recording chunk size: 100ms
 

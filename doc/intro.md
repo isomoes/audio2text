@@ -1,6 +1,6 @@
 ---
 title: "Audio2Text: Real-Time Speech-to-Text for AI Workflows"
-description: A comprehensive guide to Audio2Text, a real-time Chinese-to-English speech recognition and translation tool that enhances AI-driven development workflows
+description: A comprehensive guide to Audio2Text, a real-time Chinese speech recognition tool that enhances AI-driven development workflows
 date: 2026-01-14
 author: isomo
 tags: [audio2text, ai-workflow]
@@ -13,7 +13,7 @@ video: "https://www.bilibili.com/video/BV1uErWBXESE/"
 
 In our modern AI-powered development workflow, seamless input methods are crucial for maximizing productivity. We've developed **Audio2Text**, a real-time audio-to-text transcription tool that transforms spoken language into typed text automatically, enabling hands-free interaction with your development environment.
 
-What makes Audio2Text unique is its ability to capture speech in Chinese and automatically translate it to English in real-time. This makes it an ideal tool for:
+What makes Audio2Text useful is its ability to capture and transcribe Chinese speech in real-time. This makes it an ideal tool for:
 
 - **Chinese speakers** who want to work more efficiently with English-based AI systems
 - **Language learners** who want to practice speaking while getting instant written output
@@ -52,15 +52,15 @@ When working with multiple AI agents:
 │   Microphone    │────▶│   Audio2Text    │────▶│  Active App     │
 │   (Chinese      │     │   (Real-time    │     │  (OpenCoder,   │
 │    Voice)       │     │   ASR +         │     │   WebBoard,    │
-│                 │     │   Translation   │     │   etc.)         │
-└─────────────────┘     │   to English)   │     └─────────────────┘
-                       └────────┬────────┘              │
+│                 │     │   Chinese ASR  │     │   etc.)         │
+└─────────────────┘     │   directly     │     └─────────────────┘
+                        └────────┬────────┘              │
                                 │                        │
                                 ▼                        ▼
                          ┌─────────────────┐     ┌─────────────────┐
                          │  DashScope API │────▶│  AI Engine     │
-                         │  (Chinese →    │     │  (English       │
-                         │   English)     │     │   Optimized)    │
+                          │  (Chinese      │     │  (AI Engine     │
+                          │   Transcription)│    │   Input)        │
                          └─────────────────┘     └─────────────────┘
 ```
 
@@ -76,7 +76,7 @@ Before diving into the technical design, let us share our personal reasons for b
 
 While we are native Chinese speakers, we recognize that English is the preferred language for interacting with Large Language Models (LLMs) and most AI tools. The quality of responses from models like GPT, Claude, and others tends to be better when using English prompts. However, our English proficiency isn't perfect, and typing in English can be time-consuming.
 
-Audio2Text solves this by allowing us to speak in Chinese and automatically transcribe and translate it to English in real-time. This way, we can express our ideas naturally in our native language while still benefiting from the superior performance of English-based AI interactions.
+Audio2Text solves this by allowing us to speak in Chinese and automatically transcribe it to Chinese text in real-time. This lets us express our ideas naturally in our native language while keeping the original wording available in the active application.
 
 #### 2. **Efficiency: Voice vs. Typing Chinese**
 
@@ -88,7 +88,7 @@ By using voice as the primary input method, we can convey ideas at conversationa
 
 We've found that when we speak, we're often more expressive and confident in conveying complex ideas. Writing can sometimes feel constrained, especially in a second language. Voice allows for more natural intonation, emphasis, and emotional context that gets lost in typed text.
 
-Audio2Text gives us the opportunity to practice speaking more regularly, helping us improve both our Chinese verbal expression and, through the translation feature, our English comprehension and usage simultaneously.
+Audio2Text gives us the opportunity to practice speaking more regularly and improve our Chinese verbal expression.
 
 #### 4. **Structured Thinking Through Speech**
 
@@ -128,7 +128,7 @@ The tool runs as a background service that can be triggered on-demand. It doesn'
 **Why DashScope API?**
 
 - Real-time streaming support via WebSocket
-- Built-in transcription and translation capabilities
+- Built-in real-time transcription capabilities
 - Reliable and cost-effective for production use
 - Low latency for natural conversational flow
 
@@ -150,8 +150,7 @@ The tool runs as a background service that can be triggered on-demand. It doesn'
          │                 │                                 │
          ▼                 ▼                                 ▼
    Microphone Input    Real-time        Active Application
-   (PCM 16kHz)         Transcription    (Auto-typing)
-                       + Translation
+    (PCM 16kHz)         Chinese ASR      (Auto-typing)
 ```
 
 ### Key Features
@@ -165,8 +164,8 @@ The tool runs as a background service that can be triggered on-demand. It doesn'
 
 #### Speech Recognition
 
-- Model: `gummy-realtime-v1` from DashScope
-- Simultaneous transcription and translation to English
+- Model: `qwen-audio-3.0-asr-flash-streaming` from DashScope
+- Direct Chinese transcription without translation
 - Real-time streaming via WebSocket protocol
 - Speech activity detection for auto-stop functionality
 
@@ -218,10 +217,10 @@ bindsym $mod+Shift+i exec --no-startup-id \
 
 #### API Model Selection
 
-We chose **Alibaba DashScope's `gummy-realtime-v1`** model for several reasons:
+We chose **Alibaba DashScope's `qwen-audio-3.0-asr-flash-streaming`** model for several reasons:
 
 - **Real-time streaming**: Low-latency transcription suitable for live typing
-- **Translation capabilities**: Automatic translation to target languages (currently English)
+- **Chinese recognition**: Direct transcription with the source language set to Chinese
 - **Cost-effective**: Competitive pricing for development and production use
 - **Reliability**: Enterprise-grade uptime and support
 
@@ -231,9 +230,7 @@ Based on our testing and typical usage patterns:
 
 - **Estimated cost**: ~1 Chinese Yuan (CNY) per 2 hours of active recording
 - **Calculation**:
-  - DashScope ASR pricing: ~0.5 CNY/hour of audio
-  - Translation pricing: ~0.5 CNY/hour of audio
-  - Total: ~1 CNY/hour for both features
+  - DashScope ASR pricing: check the current DashScope pricing for the selected region
 
 **Note**: Costs may vary based on actual usage, audio length, and region-specific pricing. Always check the latest DashScope pricing for accurate estimates.
 
@@ -274,12 +271,12 @@ Audio2Text represents more than just a productivity tool—it's a personal journ
 
 For us, this project is about:
 
-- **Breaking language barriers** through seamless Chinese-to-English translation
+- **Preserving meaning** through direct Chinese transcription
 - **Improving efficiency** by leveraging voice over slow Chinese input methods
-- **Building confidence** in both verbal expression and English comprehension
+- **Building confidence** in Chinese verbal expression
 - **Developing structured thinking** through the natural flow of speech
 
-Whether you're a native English speaker looking to optimize your workflow, or someone who speaks Chinese and wants to work more effectively with English-based AI tools, Audio2Text offers a path to more natural and efficient communication.
+Whether you're a native English speaker looking to optimize your workflow, or someone who speaks Chinese and wants to enter Chinese text more efficiently, Audio2Text offers a path to more natural and efficient communication.
 
 Most importantly, this is a tool that grows with you. As you use it to speak and interact with AI systems, you'll naturally improve your language skills, become more comfortable with expression, and discover new ways to structure your thoughts.
 

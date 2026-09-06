@@ -49,6 +49,20 @@ pub struct Transcription {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Sentence {
+    pub sentence_id: i32,
+    pub begin_time: i64,
+    pub end_time: Option<i64>,
+    pub text: String,
+    #[serde(default)]
+    pub words: Vec<Word>,
+    #[serde(default)]
+    pub sentence_end: bool,
+    #[serde(default)]
+    pub heartbeat: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Translation {
     pub sentence_id: i32,
     pub begin_time: i64,
@@ -65,6 +79,8 @@ pub struct Translation {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Output {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sentence: Option<Sentence>,
     #[serde(default)]
     pub translations: Vec<Translation>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,13 +96,7 @@ pub struct Parameters {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vocabulary_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub language: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub translation_target_languages: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transcription_enabled: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub translation_enabled: Option<bool>,
+    pub language_hints: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -155,15 +165,12 @@ impl AsrClient {
                 task_group: Some("audio".to_string()),
                 task: Some("asr".to_string()),
                 function: Some("recognition".to_string()),
-                model: Some("gummy-realtime-v1".to_string()),
+                model: Some("qwen-audio-3.0-asr-flash-streaming".to_string()),
                 parameters: Some(Parameters {
                     format: Some("pcm".to_string()),
                     sample_rate: Some(16000),
                     vocabulary_id: None,
-                    language: None,
-                    transcription_enabled: Some(true),
-                    translation_enabled: Some(true),
-                    translation_target_languages: Some(vec!["en".to_string()]),
+                    language_hints: Some(vec!["zh".to_string()]),
                 }),
                 input: Some(Input {}),
                 output: None,
@@ -247,7 +254,9 @@ impl AsrClient {
                                     .unwrap_or_else(|| "Unknown error".to_string());
                                 error!("Task failed: {}", error);
                                 event_tx
-                                    .send(AsrEvent::TaskFailed { error: error.clone() })
+                                    .send(AsrEvent::TaskFailed {
+                                        error: error.clone(),
+                                    })
                                     .await?;
                                 return Err(anyhow::anyhow!("Task failed: {}", error));
                             }
@@ -274,27 +283,22 @@ impl AsrClient {
                                 match event_type.as_str() {
                                     "result-generated" => {
                                         if let Some(output) = &event.payload.output {
-                                            // Prefer translation over transcription
-                                            if !output.translations.is_empty() {
-                                                let translation = &output.translations[0];
-                                                let is_final = translation.sentence_end;
-                                                let text = translation.text.clone();
-                                                debug!(
-                                                    "Translation: {} (final: {})",
-                                                    text, is_final
-                                                );
-                                                let _ = event_tx_clone
-                                                    .send(AsrEvent::ResultGenerated { text, is_final })
-                                                    .await;
-                                            } else if let Some(transcription) = &output.transcription {
-                                                let is_final = transcription.sentence_end;
-                                                let text = transcription.text.clone();
+                                            if let Some(sentence) = &output.sentence {
+                                                // Ignore heartbeat packets; they contain no text.
+                                                if sentence.heartbeat || sentence.text.is_empty() {
+                                                    continue;
+                                                }
+                                                let is_final = sentence.sentence_end;
+                                                let text = sentence.text.clone();
                                                 debug!(
                                                     "Transcription: {} (final: {})",
                                                     text, is_final
                                                 );
                                                 let _ = event_tx_clone
-                                                    .send(AsrEvent::ResultGenerated { text, is_final })
+                                                    .send(AsrEvent::ResultGenerated {
+                                                        text,
+                                                        is_final,
+                                                    })
                                                     .await;
                                             }
                                         }

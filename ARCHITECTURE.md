@@ -22,7 +22,7 @@ The application is designed to be triggered by external hotkey software (e.g., A
 │   (websocket/)  │                                     │ (DashScope API) │
 └────────┬────────┘                                     └─────────────────┘
          │
-         │ Translation/Transcription Events
+         │ Chinese Transcription Events
          ▼
 ┌─────────────────┐
 │  Text Input     │────▶ External tools (wtype, ydotool, wl-copy)
@@ -55,13 +55,13 @@ Audio capture using the `cpal` library.
 **Responsibilities:**
 - Enumerate and select audio input devices
 - Capture raw audio data from the microphone
-- Convert audio to mono and resample to 16kHz
+- Convert audio to mono and resample to 8kHz
 - Convert to PCM format for the ASR API
 
 **Key Features:**
 - Supports all sample formats (I8, I16, I32, I64, U8, U16, U32, U64, F32, F64)
 - Automatic stereo-to-mono downmixing
-- Sample rate conversion to 16kHz (required by ASR API)
+- Sample rate conversion to 16kHz (recommended by the selected ASR model)
 - Chunked audio delivery (100ms chunks)
 
 **Target Audio Format:**
@@ -77,14 +77,14 @@ WebSocket client for Alibaba DashScope ASR API.
 - Establish WebSocket connection with authentication
 - Send run-task command with configuration
 - Stream audio data to the API
-- Receive and parse transcription/translation events
+- Receive and parse Chinese transcription events
 
 **Protocol Flow:**
 1. Connect to `wss://dashscope.aliyuncs.com/api-ws/v1/inference/`
 2. Send `run-task` command with parameters
 3. Wait for `task-started` event
 4. Stream binary audio data
-5. Receive `result-generated` events with transcriptions/translations
+5. Receive `result-generated` events with Chinese transcriptions
 6. Send `finish-task` command on completion
 
 **Current Configuration:**
@@ -92,15 +92,13 @@ WebSocket client for Alibaba DashScope ASR API.
 parameters: {
     format: "pcm",
     sample_rate: 16000,
-    transcription_enabled: true,
-    translation_enabled: true,
-    translation_target_languages: ["en"]
+    language_hints: ["zh"]
 }
 ```
 
 **Event Types:**
 - `task-started`: ASR session initialized
-- `result-generated`: Partial or final transcription/translation
+- `result-generated`: Partial or final Chinese transcription
 - `task-finished`: Session completed successfully
 - `task-failed`: Error occurred
 
@@ -125,7 +123,7 @@ Text input handler that simulates keyboard typing.
 ## Data Flow
 
 ```
-Microphone → cpal → Audio Samples → Format Conversion → Mono/Resample → PCM → WebSocket → DashScope → Translation/Transcription → Text Input → Active Window
+Microphone → cpal → Audio Samples → Format Conversion → Mono/Resample → PCM → WebSocket → DashScope → Chinese Transcription → Text Input → Active Window
 ```
 
 ## Threading Model
