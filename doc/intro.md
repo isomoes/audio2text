@@ -164,7 +164,7 @@ The tool runs as a background service that can be triggered on-demand. It doesn'
 
 #### Speech Recognition
 
-- Model: `qwen-audio-3.0-asr-flash-streaming` from DashScope
+- Model: `qwen-audio-3.1-asr-flash-streaming` from DashScope
 - Direct Chinese transcription without translation
 - Real-time streaming via WebSocket protocol
 - Speech activity detection for auto-stop functionality
@@ -217,7 +217,7 @@ bindsym $mod+Shift+i exec --no-startup-id \
 
 #### API Model Selection
 
-We chose **Alibaba DashScope's `qwen-audio-3.0-asr-flash-streaming`** model for several reasons:
+We chose **Alibaba DashScope's `qwen-audio-3.1-asr-flash-streaming`** model for several reasons:
 
 - **Real-time streaming**: Low-latency transcription suitable for live typing
 - **Chinese recognition**: Direct transcription with the source language set to Chinese

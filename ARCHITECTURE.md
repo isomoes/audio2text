@@ -55,13 +55,14 @@ Audio capture using the `cpal` library.
 **Responsibilities:**
 - Enumerate and select audio input devices
 - Capture raw audio data from the microphone
-- Convert audio to mono and resample to 8kHz
+- Convert audio to mono and resample to 16kHz
 - Convert to PCM format for the ASR API
+- Optionally dump the sent audio to a WAV file (`audio/wav.rs`, enabled by `AUDIO2TEXT_DUMP_WAV`)
 
 **Key Features:**
 - Supports all sample formats (I8, I16, I32, I64, U8, U16, U32, U64, F32, F64)
 - Automatic stereo-to-mono downmixing
-- Sample rate conversion to 16kHz (recommended by the selected ASR model)
+- Band-limited, stateful sample rate conversion to 16kHz using `rubato` (FFT resampler, no aliasing or chunk-boundary artifacts)
 - Chunked audio delivery (100ms chunks)
 
 **Target Audio Format:**
@@ -92,9 +93,16 @@ WebSocket client for Alibaba DashScope ASR API.
 parameters: {
     format: "pcm",
     sample_rate: 16000,
-    language_hints: ["zh"]
+    language_hints: ["zh", "en"],        // AUDIO2TEXT_LANGUAGE_HINTS
+    vocabulary: { "hotword": weight },   // instant hotwords from the hotwords file, omitted if empty
+    vad_model: "far_field_meeting_16k",  // AUDIO2TEXT_VAD_MODEL
+    speech_noise_threshold: f32,         // AUDIO2TEXT_SPEECH_NOISE_THRESHOLD, omitted if unset
+    max_sentence_silence: u32,           // AUDIO2TEXT_MAX_SENTENCE_SILENCE, omitted if unset
+    semantic_punctuation_enabled: bool   // AUDIO2TEXT_SEMANTIC_PUNCTUATION, omitted if unset
 }
 ```
+
+Runtime configuration is loaded from environment variables in `config.rs` (see README).
 
 **Event Types:**
 - `task-started`: ASR session initialized

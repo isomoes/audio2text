@@ -44,3 +44,5 @@ ringbuf = "0.4"
 # HTTP types for WebSocket
 http = "1"
 url = "2"
+rubato = "0.16"
+hound = "3.5"

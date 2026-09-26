@@ -1,10 +1,13 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+use crate::config::Config;
 
 const WS_URL: &str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/";
 
@@ -97,6 +100,16 @@ pub struct Parameters {
     pub vocabulary_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language_hints: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocabulary: Option<BTreeMap<String, u32>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vad_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speech_noise_threshold: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_sentence_silence: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_punctuation_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -137,13 +150,15 @@ pub enum AsrEvent {
 pub struct AsrClient {
     api_key: String,
     task_id: Option<String>,
+    config: Config,
 }
 
 impl AsrClient {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String, config: Config) -> Self {
         Self {
             api_key,
             task_id: None,
+            config,
         }
     }
 
@@ -165,12 +180,19 @@ impl AsrClient {
                 task_group: Some("audio".to_string()),
                 task: Some("asr".to_string()),
                 function: Some("recognition".to_string()),
-                model: Some("qwen-audio-3.0-asr-flash-streaming".to_string()),
+                model: Some("qwen-audio-3.1-asr-flash-streaming".to_string()),
                 parameters: Some(Parameters {
                     format: Some("pcm".to_string()),
                     sample_rate: Some(16000),
                     vocabulary_id: None,
-                    language_hints: Some(vec!["zh".to_string()]),
+                    language_hints: (!self.config.language_hints.is_empty())
+                        .then(|| self.config.language_hints.clone()),
+                    vocabulary: (!self.config.hotwords.is_empty())
+                        .then(|| self.config.hotwords.clone()),
+                    vad_model: Some(self.config.vad_model.clone()),
+                    speech_noise_threshold: self.config.speech_noise_threshold,
+                    max_sentence_silence: self.config.max_sentence_silence,
+                    semantic_punctuation_enabled: self.config.semantic_punctuation,
                 }),
                 input: Some(Input {}),
                 output: None,
