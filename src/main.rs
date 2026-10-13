@@ -2,6 +2,7 @@ mod audio;
 mod config;
 mod input;
 mod websocket;
+mod wetype;
 
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,7 +12,7 @@ use tokio::signal;
 use tracing::{error, info, warn};
 
 use audio::AudioCapture;
-use config::Config;
+use config::{AsrBackend, Config};
 use input::TextInputHandler;
 use websocket::{AsrClient, AsrEvent};
 
@@ -33,6 +34,8 @@ struct App {
     current_text: String,
     audio_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
     last_asr_result: Arc<AtomicBool>,
+    asr_task: Option<tokio::task::JoinHandle<()>>,
+    event_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl App {
@@ -46,6 +49,8 @@ impl App {
             current_text: String::new(),
             audio_tx: None,
             last_asr_result: Arc::new(AtomicBool::new(false)),
+            asr_task: None,
+            event_task: None,
         }
     }
 
@@ -76,16 +81,29 @@ impl App {
         // Start ASR client
         let api_key = self.api_key.clone();
         let config = self.config.clone();
-        tokio::spawn(async move {
-            let mut client = AsrClient::new(api_key, config);
-            if let Err(e) = client.start_recognition(audio_rx, event_tx).await {
+        self.asr_task = Some(tokio::spawn(async move {
+            let failure_tx = event_tx.clone();
+            let result = match config.backend {
+                AsrBackend::WeType => wetype::start_recognition(&config, audio_rx, event_tx).await,
+                AsrBackend::DashScope => {
+                    AsrClient::new(api_key, config)
+                        .start_recognition(audio_rx, event_tx)
+                        .await
+                }
+            };
+            if let Err(e) = result {
                 error!("ASR client error: {}", e);
+                let _ = failure_tx
+                    .send(AsrEvent::TaskFailed {
+                        error: e.to_string(),
+                    })
+                    .await;
             }
-        });
+        }));
 
         // Handle ASR events in a separate task
         let text_input = self.text_input.clone();
-        tokio::spawn(async move {
+        self.event_task = Some(tokio::spawn(async move {
             let mut event_rx = event_rx;
             while let Some(event) = event_rx.recv().await {
                 match event {
@@ -101,9 +119,10 @@ impl App {
                             if let Err(e) = text_input.type_text(&text) {
                                 error!("Failed to type text: {}", e);
                             }
+                        }
+                        if is_final {
                             info!("Final: {}", text);
                         } else {
-                            // Partial result
                             info!("Partial: {}", text);
                         }
                     }
@@ -117,10 +136,13 @@ impl App {
                     }
                 }
             }
-        });
+        }));
 
         self.state = AppState::Recording;
-        info!("Recording started. Will auto-stop after {} seconds of silence.", MAX_SILENCE_SECONDS);
+        info!(
+            "Recording started. Will auto-stop after {} seconds of silence.",
+            MAX_SILENCE_SECONDS
+        );
         info!("Press Ctrl+C to stop manually.");
 
         Ok(())
@@ -132,6 +154,28 @@ impl App {
         // Stop audio capture (this will close the audio sender)
         self.audio_capture.stop();
         self.audio_tx = None;
+
+        // Both backends finalize after the audio channel closes. Keep the runtime
+        // alive until the final result has been delivered and typed.
+        if let Some(mut task) = self.asr_task.take() {
+            if tokio::time::timeout(Duration::from_secs(45), &mut task)
+                .await
+                .is_err()
+            {
+                warn!("ASR finalization timed out");
+                task.abort();
+                let _ = task.await;
+            }
+        }
+        if let Some(mut task) = self.event_task.take() {
+            if tokio::time::timeout(Duration::from_secs(5), &mut task)
+                .await
+                .is_err()
+            {
+                task.abort();
+                let _ = task.await;
+            }
+        }
 
         // Reset state
         self.current_text.clear();
@@ -151,12 +195,6 @@ impl App {
     }
 }
 
-impl Clone for TextInputHandler {
-    fn clone(&self) -> Self {
-        TextInputHandler::new()
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize logging
@@ -170,27 +208,44 @@ async fn main() -> Result<()> {
     // Load .env file if present
     let _ = dotenvy::dotenv();
 
-    // Get API key
-    let api_key = std::env::var("DASHSCOPE_API_KEY")
-        .context("DASHSCOPE_API_KEY environment variable not set")?;
+    let config = Config::from_env()?;
+    let api_key = match config.backend {
+        AsrBackend::DashScope => std::env::var("DASHSCOPE_API_KEY")
+            .context("DASHSCOPE_API_KEY environment variable not set")?,
+        AsrBackend::WeType => String::new(),
+    };
+    info!("ASR backend: {:?}", config.backend);
+    if config.backend == AsrBackend::WeType {
+        info!(
+            "WeType: append finalized segments, pause {}ms, RMS voice threshold {} (no Backspace)",
+            config.wetype_segment_silence_ms, config.wetype_voice_threshold
+        );
+    }
 
-    info!("Audio2Text v{} - Real-time speech recognition", env!("CARGO_PKG_VERSION"));
-    info!("Will auto-stop after {} seconds of silence (no speech detected).", MAX_SILENCE_SECONDS);
+    info!(
+        "Audio2Text v{} - Real-time speech recognition",
+        env!("CARGO_PKG_VERSION")
+    );
+    info!(
+        "Will auto-stop after {} seconds of silence (no speech detected).",
+        MAX_SILENCE_SECONDS
+    );
     info!("Press Ctrl+C to stop manually.");
 
     // Check for required tools
     check_dependencies();
 
-    let config = Config::from_env()?;
-    info!(
-        "Language hints: {:?}, VAD model: {}, speech/noise threshold: {:?}, \
+    if config.backend == AsrBackend::DashScope {
+        info!(
+            "Language hints: {:?}, VAD model: {}, speech/noise threshold: {:?}, \
          max sentence silence: {:?}, semantic punctuation: {:?}",
-        config.language_hints,
-        config.vad_model,
-        config.speech_noise_threshold,
-        config.max_sentence_silence,
-        config.semantic_punctuation
-    );
+            config.language_hints,
+            config.vad_model,
+            config.speech_noise_threshold,
+            config.max_sentence_silence,
+            config.semantic_punctuation
+        );
+    }
 
     // Create app
     let app = Arc::new(tokio::sync::Mutex::new(App::new(api_key, config)));
@@ -201,7 +256,12 @@ async fn main() -> Result<()> {
 
     // Spawn a separate task for Ctrl+C handling
     tokio::spawn(async move {
-        signal::ctrl_c().await.ok();
+        let mut terminate = signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to register SIGTERM handler");
+        tokio::select! {
+            _ = signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
         info!("\nShutting down...");
         running_clone.store(false, Ordering::SeqCst);
     });
@@ -222,6 +282,9 @@ async fn main() -> Result<()> {
         // Check if ASR has detected any speech
         let has_speech = {
             let app = app.lock().await;
+            if app.asr_task.as_ref().is_some_and(|task| task.is_finished()) {
+                running.store(false, Ordering::SeqCst);
+            }
             app.check_and_reset_asr_result()
         };
 
@@ -232,16 +295,25 @@ async fn main() -> Result<()> {
         // Check if we've exceeded the silence timeout
         let silence_duration = last_speech_time.elapsed().as_secs();
         if silence_duration >= MAX_SILENCE_SECONDS {
-            info!("No speech detected for {} seconds. Auto-stopping...", MAX_SILENCE_SECONDS);
+            info!(
+                "No speech detected for {} seconds. Auto-stopping...",
+                MAX_SILENCE_SECONDS
+            );
             running.store(false, Ordering::SeqCst);
             break;
         }
 
         // Optional: Log silence progress every 10 seconds
-        if silence_duration > 0 && silence_duration % 10 == 0 && silence_duration < MAX_SILENCE_SECONDS {
+        if silence_duration > 0
+            && silence_duration % 10 == 0
+            && silence_duration < MAX_SILENCE_SECONDS
+        {
             let prev_check = last_speech_time.elapsed().as_secs();
             if prev_check == silence_duration {
-                info!("Silence duration: {} seconds / {} maximum", silence_duration, MAX_SILENCE_SECONDS);
+                info!(
+                    "Silence duration: {} seconds / {} maximum",
+                    silence_duration, MAX_SILENCE_SECONDS
+                );
             }
         }
     }

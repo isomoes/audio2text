@@ -11,8 +11,29 @@ const MAX_HOTWORDS: usize = 2000;
 const MAX_SUPER_HOTWORDS: usize = 50;
 const MAX_LANGUAGE_HINTS: usize = 4;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum AsrBackend {
+    DashScope,
+    #[default]
+    WeType,
+}
+
+impl AsrBackend {
+    fn parse(value: &str) -> Result<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "dashscope" => Ok(Self::DashScope),
+            "wetype" | "wx-client" => Ok(Self::WeType),
+            _ => bail!("AUDIO2TEXT_ASR_BACKEND: expected dashscope or wetype, got {value:?}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
+    pub backend: AsrBackend,
+    pub wetype_identity: PathBuf,
+    pub wetype_segment_silence_ms: u32,
+    pub wetype_voice_threshold: f32,
     pub language_hints: Vec<String>,
     /// Instant hotwords: text -> weight (1-5, or 50 for a "super" hotword).
     pub hotwords: BTreeMap<String, u32>,
@@ -35,10 +56,36 @@ impl Config {
     /// - `AUDIO2TEXT_SEMANTIC_PUNCTUATION`: `true`/`false`, split sentences semantically instead of by silence
     /// - `AUDIO2TEXT_DUMP_WAV`: if set, write the audio sent to the ASR service to this WAV file
     pub fn from_env() -> Result<Self> {
+        let backend = non_empty_env("AUDIO2TEXT_ASR_BACKEND")
+            .map(|value| AsrBackend::parse(&value))
+            .transpose()?
+            .unwrap_or_default();
+        let wetype_identity = non_empty_env("AUDIO2TEXT_WETYPE_IDENTITY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                let cache = non_empty_env("XDG_CACHE_HOME")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache")
+                    });
+                cache.join("audio2text/wetype-identity.json")
+            });
         let language_hints =
             parse_language_hints(std::env::var("AUDIO2TEXT_LANGUAGE_HINTS").ok().as_deref());
 
-        let hotwords = match hotwords_path() {
+        let wetype_segment_silence_ms = non_empty_env("AUDIO2TEXT_WETYPE_SEGMENT_SILENCE_MS")
+            .map(|value| parse_segment_silence(&value))
+            .transpose()?
+            .unwrap_or(1000);
+        let wetype_voice_threshold = non_empty_env("AUDIO2TEXT_WETYPE_VOICE_THRESHOLD")
+            .map(|value| parse_voice_threshold(&value))
+            .transpose()?
+            .unwrap_or(0.01);
+
+        let hotwords = match (backend == AsrBackend::DashScope)
+            .then(hotwords_path)
+            .flatten()
+        {
             Some(path) => {
                 let hotwords = load_hotwords(&path)?;
                 info!("Loaded {} hotwords from {}", hotwords.len(), path.display());
@@ -50,21 +97,31 @@ impl Config {
         let vad_model =
             non_empty_env("AUDIO2TEXT_VAD_MODEL").unwrap_or_else(|| DEFAULT_VAD_MODEL.to_string());
 
-        let speech_noise_threshold = non_empty_env("AUDIO2TEXT_SPEECH_NOISE_THRESHOLD")
+        let speech_noise_threshold = (backend == AsrBackend::DashScope)
+            .then(|| non_empty_env("AUDIO2TEXT_SPEECH_NOISE_THRESHOLD"))
+            .flatten()
             .map(|v| parse_speech_noise_threshold(&v))
             .transpose()?;
 
-        let max_sentence_silence = non_empty_env("AUDIO2TEXT_MAX_SENTENCE_SILENCE")
+        let max_sentence_silence = (backend == AsrBackend::DashScope)
+            .then(|| non_empty_env("AUDIO2TEXT_MAX_SENTENCE_SILENCE"))
+            .flatten()
             .map(|v| parse_max_sentence_silence(&v))
             .transpose()?;
 
-        let semantic_punctuation = non_empty_env("AUDIO2TEXT_SEMANTIC_PUNCTUATION")
+        let semantic_punctuation = (backend == AsrBackend::DashScope)
+            .then(|| non_empty_env("AUDIO2TEXT_SEMANTIC_PUNCTUATION"))
+            .flatten()
             .map(|v| parse_bool("AUDIO2TEXT_SEMANTIC_PUNCTUATION", &v))
             .transpose()?;
 
         let dump_wav = non_empty_env("AUDIO2TEXT_DUMP_WAV").map(PathBuf::from);
 
         Ok(Self {
+            backend,
+            wetype_identity,
+            wetype_segment_silence_ms,
+            wetype_voice_threshold,
             language_hints,
             hotwords,
             vad_model,
@@ -74,6 +131,26 @@ impl Config {
             dump_wav,
         })
     }
+}
+
+fn parse_segment_silence(value: &str) -> Result<u32> {
+    let ms: u32 = value
+        .parse()
+        .context("AUDIO2TEXT_WETYPE_SEGMENT_SILENCE_MS: invalid integer")?;
+    if !(200..=6000).contains(&ms) {
+        bail!("AUDIO2TEXT_WETYPE_SEGMENT_SILENCE_MS must be in [200, 6000]");
+    }
+    Ok(ms)
+}
+
+fn parse_voice_threshold(value: &str) -> Result<f32> {
+    let threshold: f32 = value
+        .parse()
+        .context("AUDIO2TEXT_WETYPE_VOICE_THRESHOLD: invalid number")?;
+    if !threshold.is_finite() || !(0.0..=1.0).contains(&threshold) || threshold == 0.0 {
+        bail!("AUDIO2TEXT_WETYPE_VOICE_THRESHOLD must be in (0, 1]");
+    }
+    Ok(threshold)
 }
 
 fn parse_max_sentence_silence(value: &str) -> Result<u32> {
@@ -222,6 +299,30 @@ fn parse_hotwords(content: &str) -> Result<BTreeMap<String, u32>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validates_local_segmentation_settings() {
+        assert_eq!(parse_segment_silence("1000").unwrap(), 1000);
+        for value in ["0", "199", "6001", "invalid"] {
+            assert!(parse_segment_silence(value).is_err());
+        }
+        assert_eq!(parse_voice_threshold("0.01").unwrap(), 0.01);
+        for value in ["0", "-1", "1.1", "NaN", "inf"] {
+            assert!(parse_voice_threshold(value).is_err());
+        }
+    }
+
+    #[test]
+    fn parses_backends() {
+        assert_eq!(AsrBackend::default(), AsrBackend::WeType);
+        assert_eq!(
+            AsrBackend::parse("dashscope").unwrap(),
+            AsrBackend::DashScope
+        );
+        assert_eq!(AsrBackend::parse("wetype").unwrap(), AsrBackend::WeType);
+        assert_eq!(AsrBackend::parse("wx-client").unwrap(), AsrBackend::WeType);
+        assert!(AsrBackend::parse("unknown").is_err());
+    }
 
     #[test]
     fn parses_hotwords_with_and_without_weights() {

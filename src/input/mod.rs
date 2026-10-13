@@ -4,6 +4,7 @@ use tracing::{debug, error, info, warn};
 
 /// Text input handler for Wayland
 /// Uses wtype (preferred) or ydotool for text input simulation
+#[derive(Clone)]
 pub struct TextInputHandler {
     method: InputMethod,
 }
@@ -100,86 +101,11 @@ impl TextInputHandler {
         let output = child.wait_with_output()?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("wl-copy may have failed: {}", stderr);
+            anyhow::bail!("wl-copy failed: {}", stderr);
         }
 
         info!("Text copied to clipboard. Press Ctrl+V to paste.");
         Ok(())
-    }
-
-    /// Type text incrementally (for real-time transcription)
-    /// This replaces the previous partial text with the new text
-    pub fn update_text(&self, previous: &str, new: &str) -> Result<()> {
-        if previous == new {
-            return Ok(());
-        }
-
-        // Find the common prefix
-        let common_len = previous
-            .chars()
-            .zip(new.chars())
-            .take_while(|(a, b)| a == b)
-            .count();
-
-        let prev_chars: Vec<char> = previous.chars().collect();
-        let new_chars: Vec<char> = new.chars().collect();
-
-        // Number of characters to delete
-        let delete_count = prev_chars.len() - common_len;
-
-        // Characters to add
-        let add_text: String = new_chars[common_len..].iter().collect();
-
-        // Delete previous characters
-        if delete_count > 0 {
-            self.delete_chars(delete_count)?;
-        }
-
-        // Type new characters
-        if !add_text.is_empty() {
-            self.type_text(&add_text)?;
-        }
-
-        Ok(())
-    }
-
-    fn delete_chars(&self, count: usize) -> Result<()> {
-        if count == 0 {
-            return Ok(());
-        }
-
-        debug!("Deleting {} characters", count);
-
-        match self.method {
-            InputMethod::Wtype => {
-                // wtype can send key presses
-                for _ in 0..count {
-                    Command::new("wtype")
-                        .arg("-k")
-                        .arg("BackSpace")
-                        .output()
-                        .context("Failed to send backspace via wtype")?;
-                }
-                Ok(())
-            }
-            InputMethod::Ydotool => {
-                // ydotool can send key presses
-                for _ in 0..count {
-                    Command::new("ydotool")
-                        .arg("key")
-                        .arg("14:1") // BackSpace key code
-                        .arg("14:0")
-                        .output()
-                        .context("Failed to send backspace via ydotool")?;
-                }
-                Ok(())
-            }
-            InputMethod::WlCopy => {
-                // Can't delete with clipboard method
-                warn!("Cannot delete characters with clipboard method");
-                Ok(())
-            }
-        }
     }
 }
 

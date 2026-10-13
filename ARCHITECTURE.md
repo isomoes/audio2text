@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a real-time speech-to-text application that captures audio from the microphone, sends it to Alibaba DashScope's ASR (Automatic Speech Recognition) API, and types out the translated text using external input tools.
+This speech-to-text application captures microphone audio, sends it to WeType (default) or Alibaba DashScope, and types the transcription using external input tools.
 
 The application is designed to be triggered by external hotkey software (e.g., AutoKey, sxhkd) rather than having built-in global hotkey functionality.
 
@@ -74,6 +74,8 @@ Audio capture using the `cpal` library.
 
 WebSocket client for Alibaba DashScope ASR API.
 
+Selected with `AUDIO2TEXT_ASR_BACKEND=dashscope` and requires `DASHSCOPE_API_KEY`.
+
 **Responsibilities:**
 - Establish WebSocket connection with authentication
 - Send run-task command with configuration
@@ -110,6 +112,34 @@ Runtime configuration is loaded from environment variables in `config.rs` (see R
 - `task-finished`: Session completed successfully
 - `task-failed`: Error occurred
 
+### `wetype/mod.rs`
+
+Default ASR backend (`AUDIO2TEXT_ASR_BACKEND=wetype`, alias `wx-client`), ported
+from `wetype-x11/main.go`. Uses the existing 16kHz mono PCM capture, encodes
+20ms Opus frames, and uploads six frames per request over a `wxws_pb` WebSocket.
+The protocol uses protobuf-wire messages, secp128r1 ECDH, AES-256-ECB with PKCS#7,
+signed headers and raw Snappy compression. Device registration is automatic;
+the identity is cached at `$XDG_CACHE_HOME/audio2text/wetype-identity.json`
+(or `~/.cache/audio2text/wetype-identity.json`) with mode 0600. Override with
+`AUDIO2TEXT_WETYPE_IDENTITY` to reuse a wetype-x11 identity.
+
+`wetype/segment.rs` independently detects local pauses using the RMS energy of
+20ms PCM frames (default threshold 0.01). It retains 200ms pre-roll, closes a
+segment after 1000ms silence, and splits continuous speech at 30 seconds.
+`AUDIO2TEXT_WETYPE_SEGMENT_SILENCE_MS` and `AUDIO2TEXT_WETYPE_VOICE_THRESHOLD`
+configure pause detection. This is not a server-side sentence-final marker.
+
+A bounded 30-second frame queue separates capture/segmentation from sequential
+network requests. Each segment has a fresh voice ID and Opus encoder; the
+authenticated connection is reused. Finalization polls for polished text,
+falling back to the latest partial. Exactly one final result per segment is
+appended by the input handler, without Backspace. Partials are logged only.
+When capture stops, queued audio is drained and the last active segment is
+finalized (padding an incomplete frame). DashScope still types only finalized
+sentences. Ctrl+C and SIGTERM both
+allow finalization before exit. No API key is required. This is an unofficial
+protocol and sends audio to `wetype.weixin.qq.com`.
+
 ### `input/mod.rs`
 
 Text input handler that simulates keyboard typing.
@@ -125,8 +155,10 @@ Text input handler that simulates keyboard typing.
 
 **Implementation:**
 - Uses `std::process::Command` to invoke external tools
-- Each word is typed individually for better real-time feedback
-- Errors are logged but don't stop the application
+- Only finalized segments/sentences are typed, once each. No Backspace is sent.
+- Clipboard-only input copies the latest finalized segment for manual pasting.
+- Errors are logged, without retrying possibly partially typed text. Keep the
+  intended input focused when finalized text arrives.
 
 ## Data Flow
 
@@ -164,7 +196,8 @@ cargo run --release
 
 ## Environment Variables
 
-- `DASHSCOPE_API_KEY`: (Required) Alibaba DashScope API key
+- `AUDIO2TEXT_ASR_BACKEND`: `wetype` (default) or `dashscope`
+- `DASHSCOPE_API_KEY`: Required only for the DashScope backend
 - `RUST_LOG`: (Optional) Log level (e.g., `debug`, `info`, `warn`)
 
 ## External Hotkey Setup
@@ -190,6 +223,7 @@ Create a service that can be started/stopped via hotkey.
 - `cpal` - Audio capture
 - `tokio` - Async runtime
 - `tokio-tungstenite` - WebSocket client
+- `libopus` - WeType audio encoding
 - `wtype` or `ydotool` - Text input (external)
 
 ### Development
