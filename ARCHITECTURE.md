@@ -25,7 +25,7 @@ The application is designed to be triggered by external hotkey software (e.g., A
          │ Chinese Transcription Events
          ▼
 ┌─────────────────┐
-│  Text Input     │────▶ External tools (wtype, ydotool, wl-copy)
+│  Text Input     │────▶ Native Wayland virtual keyboard / wl-copy
 │   (input/)      │
 └─────────────────┘
 ```
@@ -146,15 +146,19 @@ Text input handler that simulates keyboard typing.
 
 **Responsibilities:**
 - Type text into the active window
-- Fallback to clipboard if direct typing fails
+- Fallback to manual clipboard input if native Wayland initialization is unavailable
 
-**Supported Tools (in order of preference):**
-1. `wtype` - Wayland native input tool
-2. `ydotool` - Universal input tool (requires daemon)
-3. `wl-copy` - Clipboard fallback (Wayland)
+**Backends (in order of preference):**
+1. Native `zwp_virtual_keyboard_manager_v1` client (`input/virtual_keyboard.rs`)
+2. `wl-copy` - Manual clipboard fallback (Wayland)
 
 **Implementation:**
-- Uses `std::process::Command` to invoke external tools
+- Native input uses only printable evdev keycodes for printable characters.
+  Newline and tab use their real keys; other control characters are rejected.
+- Segments are split when the printable keycode pool is exhausted. All keys
+  are released before replacing the keymap. The keyboard connection persists
+  across segments and is serialized between cloned input handlers.
+- `std::process::Command` is used only for the clipboard fallback.
 - Only finalized segments/sentences are typed, once each. No Backspace is sent.
 - Clipboard-only input copies the latest finalized segment for manual pasting.
 - Errors are logged, without retrying possibly partially typed text. Keep the
@@ -224,7 +228,7 @@ Create a service that can be started/stopped via hotkey.
 - `tokio` - Async runtime
 - `tokio-tungstenite` - WebSocket client
 - `libopus` - WeType audio encoding
-- `wtype` or `ydotool` - Text input (external)
+- Wayland virtual keyboard protocol - Native text input
 
 ### Development
 - `anyhow` - Error handling

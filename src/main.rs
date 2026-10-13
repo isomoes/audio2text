@@ -232,9 +232,6 @@ async fn main() -> Result<()> {
     );
     info!("Press Ctrl+C to stop manually.");
 
-    // Check for required tools
-    check_dependencies();
-
     if config.backend == AsrBackend::DashScope {
         info!(
             "Language hints: {:?}, VAD model: {}, speech/noise threshold: {:?}, \
@@ -326,35 +323,4 @@ async fn main() -> Result<()> {
 
     info!("Goodbye!");
     Ok(())
-}
-
-fn check_dependencies() {
-    let tools = [
-        ("wtype", "For typing text in Wayland"),
-        ("ydotool", "Alternative for typing text"),
-        ("wl-copy", "Fallback: copy to clipboard"),
-    ];
-
-    let mut found_input_tool = false;
-
-    for (tool, description) in tools {
-        if std::process::Command::new("which")
-            .arg(tool)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-        {
-            info!("✓ {} found - {}", tool, description);
-            if tool == "wtype" || tool == "ydotool" {
-                found_input_tool = true;
-            }
-        } else {
-            warn!("✗ {} not found - {}", tool, description);
-        }
-    }
-
-    if !found_input_tool {
-        warn!("No text input tool found! Install wtype or ydotool for best experience.");
-        warn!("Install with: sudo pacman -S wtype  (Arch Linux)");
-    }
 }

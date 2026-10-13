@@ -14,16 +14,14 @@ Chinese audio-to-text transcription tool for Wayland using WeType (default) or D
 
 ### System Dependencies
 
-Install the required tools for Wayland text input:
+Direct input uses the compositor's `zwp_virtual_keyboard_manager_v1` protocol
+(for example, Sway or Hyprland). No `wtype` or `ydotool` is required.
+Run audio2text inside your Wayland session so `WAYLAND_DISPLAY` is available.
+
+For the optional manual clipboard fallback:
 
 ```bash
-# Arch Linux / Manjaro
-sudo pacman -S wtype
-
-# Or alternative (ydotool)
-sudo pacman -S ydotool
-
-# Or fallback (clipboard only)
+# Arch Linux / Manjaro (clipboard only)
 sudo pacman -S wl-clipboard
 ```
 
@@ -184,9 +182,17 @@ Hotkey configuration is handled by your window manager (see Sway Configuration a
 - Ensure your microphone is connected and recognized by the system
 - Check with `pavucontrol` or `wpctl` (PipeWire)
 
-### "No suitable text input method found"
-- Install `wtype` (recommended) or `ydotool` for Wayland
-- Alternatively, install `wl-clipboard` for clipboard-based input
+### "Native Wayland input unavailable"
+- Run from the same Wayland session as the target application.
+- The compositor must expose `zwp_virtual_keyboard_manager_v1`.
+- Without that protocol, install `wl-clipboard` for manual clipboard-based input.
+
+### Browser drops characters or exits the input with Surfingkeys enabled
+- Use the new binary with startup message `Using native Wayland virtual keyboard with printable keycodes`.
+- The built-in keyboard maps printable text only to printable evdev keycodes,
+  not Esc, Backspace or modifier keys. It sends no `VoidSymbol` events.
+- Long segments use multiple keymaps; the virtual keyboard stays connected
+  across segments. Keep the intended input focused when text arrives.
 
 ### Audio quality issues
 - Check your microphone settings in PulseAudio/PipeWire

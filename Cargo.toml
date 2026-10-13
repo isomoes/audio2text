@@ -15,9 +15,10 @@ futures-util = "0.3"
 cpal = "0.15"
 
 
-# Text input simulation (virtual keyboard for Wayland)
-# Using wl-clipboard and ydotool for Wayland compatibility
-# These will be called via Command
+# Native Wayland virtual keyboard; wl-copy remains a manual fallback.
+wayland-client = "0.31"
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+tempfile = "3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
